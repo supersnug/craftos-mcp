@@ -1,10 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { crc32, decodeScreen, FrameDecoder, packet, cstring } from '../src/protocol.js';
+import { crc32, decodeForeground, decodeScreen, FrameDecoder, packet, cstring } from '../src/protocol.js';
 import { connectionDetails, encodeText } from '../src/session.js';
 
 test('CRC32 agrees with the standard check vector', () => {
   assert.equal(crc32(Buffer.from('123456789')), 0xcbf43926);
+});
+
+test('foreground packets validate state and distinguish prompt readiness from program input', () => {
+  const make = (kind: string, ready: number, path = '', id = '') => Buffer.concat([
+    Buffer.from([70, 0, 1, ready]), cstring(kind), cstring(path), cstring('work'), cstring(id),
+  ]);
+  const idle = decodeForeground(make('shell', 1));
+  assert.equal(idle.prompt, 'idle');
+  assert.equal(idle.workingDirectory, '/work');
+  assert.equal(decodeForeground(make('shell', 0)).prompt, 'editing');
+  const repl = decodeForeground(make('lua_repl', 0, 'rom/programs/lua.lua', 'a'.repeat(32)));
+  assert.equal(repl.programName, 'lua.lua');
+  assert.equal(repl.commandId, 'a'.repeat(32));
+  assert.equal(repl.canRunCommand, false);
+  assert.throws(() => decodeForeground(make('program', 1)), /Invalid foreground/);
+  assert.throws(() => decodeForeground(make('invented', 0)), /Invalid foreground/);
+  assert.throws(() => decodeForeground(make('program', 0, '', 'bad-id')), /Invalid foreground/);
+  assert.throws(() => decodeForeground(make('shell', 1).subarray(0, -1)), /Unterminated/);
 });
 
 test('streaming frames accept fragmented and coalesced short/extended packets', () => {

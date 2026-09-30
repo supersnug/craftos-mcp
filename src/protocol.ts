@@ -2,6 +2,45 @@
 // Reference: https://github.com/MCJack123/remote.craftos-pc.cc/blob/master/rawterm.lua
 const MAX_FRAME = 8 * 1024 * 1024;
 export const ENHANCED_FLAG = 0x8000;
+export const COMMAND_TRACKING_FLAG = 0x4000;
+export const OUTPUT_CAPTURE_FLAG = 0x2000;
+export const FOREGROUND_FLAG = 0x1000;
+export const INTERRUPT_FLAG = 0x0800;
+export const SAFE_WRITE_FLAG = 0x0400;
+export const SYNC_FILES_FLAG = 0x0200;
+export const RESUME_FLAG = 0x0100;
+export const DEBUG_EVENT_FLAG = 0x0080;
+export const IDENTITY_FLAG = 0x0040;
+
+export interface Foreground {
+  kind: 'unknown' | 'shell' | 'starting' | 'program' | 'lua_repl';
+  canRunCommand: boolean;
+  prompt?: 'idle' | 'editing';
+  program?: string;
+  programName?: string;
+  workingDirectory: string;
+  commandId?: string;
+  observedAt: string;
+}
+
+export function decodeForeground(data: Buffer): Foreground {
+  if (data.length < 8 || data[2] !== 1 || data[3] > 1) throw new Error('Invalid foreground packet');
+  let offset = 4;
+  const fields: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const [value, next] = readCString(data, offset);
+    if (value.length > 4095) throw new Error('Oversized foreground field');
+    fields.push(value); offset = next;
+  }
+  const [kind, program, directory, commandId] = fields;
+  if (offset !== data.length || !['unknown', 'shell', 'starting', 'program', 'lua_repl'].includes(kind)
+    || (data[3] === 1 && kind !== 'shell') || (commandId && !/^[a-f0-9]{32}$/.test(commandId))) throw new Error('Invalid foreground state');
+  return { kind: kind as Foreground['kind'], canRunCommand: data[3] === 1,
+    prompt: kind === 'shell' ? data[3] === 1 ? 'idle' : 'editing' : undefined,
+    program: program || undefined, programName: program ? program.split('/').pop() : undefined,
+    workingDirectory: '/' + directory.replace(/^\/+/, ''),
+    commandId: commandId || undefined, observedAt: new Date().toISOString() };
+}
 export const ENHANCED_SIGNATURE = Buffer.from('CCMCP/1\0', 'ascii');
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
@@ -66,6 +105,29 @@ export function readCString(data: Buffer, offset: number): [string, number] {
   const end = data.indexOf(0, offset);
   if (end < 0) throw new Error('Unterminated protocol string');
   return [data.toString('latin1', offset, end), end + 1];
+}
+
+export function decodeOutput(data: Buffer) {
+  if (data.length < 5 || data[2] !== 1) throw new Error('Unsupported output packet');
+  const count = data.readUInt16LE(3);
+  const records: { kind: 0 | 1; row: number; commandId?: string; text: string }[] = [];
+  let offset = 5;
+  for (let i = 0; i < count; i++) {
+    if (offset + 3 > data.length) throw new Error('Truncated output record');
+    const kind = data[offset], row = data.readUInt16LE(offset + 1);
+    if (kind > 1 || row === 0) throw new Error('Invalid output record');
+    const [commandId, next] = readCString(data, offset + 3);
+    if (commandId && !/^[0-9a-f]{32}$/.test(commandId)) throw new Error('Invalid output command ID');
+    offset = next;
+    if (offset + 4 > data.length) throw new Error('Truncated output length');
+    const length = data.readUInt32LE(offset);
+    offset += 4;
+    if (length > 65535 || offset + length > data.length) throw new Error('Invalid output text length');
+    records.push({ kind: kind as 0 | 1, row, commandId: commandId || undefined, text: data.toString('latin1', offset, offset + length) });
+    offset += length;
+  }
+  if (offset !== data.length) throw new Error('Trailing output packet data');
+  return records;
 }
 
 export function event(name: string, text?: string): Buffer {

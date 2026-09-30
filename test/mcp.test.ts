@@ -13,7 +13,7 @@ test('MCP handshake exposes tools and returns actionable tool errors', async t =
   await server.connect(a);
   await client.connect(b);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 13);
+  assert.equal(tools.length, 27);
   assert.ok(tools.some(tool => tool.name === 'edit_file'));
   const result = await client.callTool({ name: 'read_file', arguments: { name: 'missing', path: 'test.lua' } });
   assert.equal(result.isError, true);
@@ -21,6 +21,9 @@ test('MCP handshake exposes tools and returns actionable tool errors', async t =
   const list = await client.callTool({ name: 'list_computers', arguments: {} });
   assert.equal(list.isError, undefined);
   assert.deepEqual(list.content, [{ type: 'text', text: '[]' }]);
+  const debug = await client.callTool({ name: 'send_event', arguments: { name: 'missing', event: 'debug' } });
+  assert.equal(debug.isError, true);
+  assert.match(JSON.stringify(debug.content), /players cannot inject arbitrary events through normal in-game controls/);
 });
 
 test('compiled entry point completes an MCP stdio handshake and shuts down cleanly', async t => {
@@ -28,5 +31,5 @@ test('compiled entry point completes an MCP stdio handshake and shuts down clean
   const transport = new StdioClientTransport({ command: process.execPath, args: ['dist/index.js'], stderr: 'pipe' });
   t.after(() => client.close());
   await client.connect(transport);
-  assert.equal((await client.listTools()).tools.length, 13);
+  assert.equal((await client.listTools()).tools.length, 27);
 });
