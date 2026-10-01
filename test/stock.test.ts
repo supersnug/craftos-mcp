@@ -79,10 +79,11 @@ test('stock bootstrap, enhanced 1 MiB files, and legacy terminal compatibility i
   }
   const connection = await call('connect_computer', { relay, token: 'integration', script: 'stock' });
   assert.match(connection.connectionCommand, /wget run/);
-  function startComputer(command: string, monitor = false) {
+  function startComputer(command?: string, monitor = false) {
     const computer = spawn(process.env.CRAFTOS_BIN ?? 'craftos', [
-      monitor ? '--raw' : '--headless', '--directory', directory, '--exec',
-      `settings.set("bios.use_multishell", false); ${monitor ? 'assert(periphemu.create("left", "monitor")); assert(periphemu.create("back", "monitor"));' : ''} shell.run(${JSON.stringify(command)})`,
+      monitor ? '--raw' : '--headless', '--directory', directory,
+      ...(command === undefined ? [] : ['--exec',
+        `settings.set("bios.use_multishell", false); ${monitor ? 'assert(periphemu.create("left", "monitor")); assert(periphemu.create("back", "monitor"));' : ''} shell.run(${JSON.stringify(command)})`]),
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
     computer.stdout.on('data', data => { output = (output + data.toString()).slice(-16000); });
     computer.stderr.on('data', data => { output = (output + data.toString()).slice(-16000); });
@@ -392,8 +393,12 @@ test('stock bootstrap, enhanced 1 MiB files, and legacy terminal compatibility i
   await call('send_key', { key: 'enter', wait_ms: 100 });
   await call('write_file', { path: '/nested.lua', content: 'shell.run("wait")' });
   const nested = await call('run_command', { command: 'nested', wait_ms: 150 });
-  assert.match(nested.connection.foreground.program, /wait.lua$/);
-  assert.equal(nested.connection.foreground.commandId, nested.commandId);
+  // wait_ms is a snapshot delay, not a guarantee that shell.run has reached
+  // the nested program's first yield (especially under emulator load).
+  await waitFor(() => /wait.lua$/.test(sessions.get('stock').status().foreground.program ?? ''));
+  const nestedForeground = (await call('read_terminal', { wait_ms: 0 })).foreground;
+  assert.match(nestedForeground.program, /wait.lua$/);
+  assert.equal(nestedForeground.commandId, nested.commandId);
   await call('interrupt_program', { wait_ms: 100 });
   await call('run_command', { command: 'cd /rom', wait_ms: 100 });
   await waitFor(() => sessions.get('stock').status().foreground.workingDirectory === '/rom');
@@ -574,8 +579,9 @@ test('stock bootstrap, enhanced 1 MiB files, and legacy terminal compatibility i
   await call('send_key', { key: 'enter', wait_ms: 100 });
   assert.equal((await call('get_command_status', { command_id: residentInput.commandId })).command.state, 'finished');
   await resident.stop();
-  // Run the actual ROM startup dispatcher as a fresh boot, preserving startup.lua.
-  const booted = startComputer('/rom/startup.lua');
+  // A normal boot runs the ROM dispatcher. Calling it through --exec would
+  // recursively run that same --exec code via _CCPC_STARTUP_SCRIPT.
+  const booted = startComputer();
   await waitFor(() => sessions.get('stock').status().state === 'connected' && sessions.get('stock').status().reconnection.remoteEpoch !== initialEpoch);
   assert.equal((await call('read_file', { path: '/boot-marker' })).content, 'booted');
   assert.equal((await call('read_file', { path: '/once' })).content, 'x');

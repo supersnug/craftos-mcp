@@ -68,6 +68,20 @@ for (const reconnect of [false, true]) test(`launcher remains responsive after s
   assert.match(identity.craftosVersion!, /^CraftOS/);
   assert.ok(identity.peripherals!.find(p => p.name === 'left')!.types.includes('monitor'));
   assert.ok(identity.peripherals!.find(p => p.name === 'left')!.methods.includes('write'));
+  // A filesystem implementation may yield. An unrelated local timer must not
+  // let upstream's parallel event race abandon the in-flight file response.
+  await session.write('/yielding-read', Buffer.from('survived'));
+  await session.write('/yielding-filesystem.lua', Buffer.from([
+    'local open=fs.open',
+    'fs.open=function(path,mode) local h,e=open(path,mode)',
+    'if h and fs.getName(path)=="yielding-read" and mode=="rb" then',
+    'local read=h.read; h.read=function(...) fs.open=open; os.startTimer(0); sleep(0.1); return read(...) end',
+    'end; return h,e end',
+  ].join('\n')));
+  const yielding = await session.exclusive(() => session.terminal('command', 'yielding-filesystem', 0));
+  assert.ok('commandId' in yielding);
+  await until(async () => (await session.commandStatus(yielding.commandId)).command.state === 'finished');
+  assert.equal((await session.exclusive(() => session.read('/yielding-read'))).toString(), 'survived');
   await session.write('/identity-change.lua', Buffer.from([
     'os.setComputerLabel("Updated label"); assert(periphemu.create("right","monitor")); sleep(0.1); periphemu.remove("back")',
     // A synthetic standard-API device tests modded/wired naming and multiple types.
@@ -85,7 +99,19 @@ for (const reconnect of [false, true]) test(`launcher remains responsive after s
   assert.deepEqual(modded.types, ['energyDetector', 'energy_storage']);
   assert.deepEqual(modded.methods, ['getTransferRate', 'setTransferRateLimit']);
   await session.exclusive(() => session.interrupt('force', inspecting.commandId, 100));
+  await session.write('/nested-wait.lua', Buffer.from('while true do os.pullEvent("key") end'));
+  await session.write('/delayed-nested.lua', Buffer.from('sleep(0.3); shell.run("nested-wait")'));
+  const nested = await session.exclusive(() => session.terminal('command', 'delayed-nested', 0));
+  assert.ok('commandId' in nested);
+  await until(() => session.status().foreground.program === 'nested-wait.lua');
+  assert.equal(session.status().foreground.commandId, nested.commandId);
+  await session.exclusive(() => session.interrupt('force', nested.commandId, 100));
   const large = Buffer.alloc(1024 * 1024, 97);
+  for (let i = 0; i < large.length; i++) large[i] = i % 256;
+  await session.write('/monitor-setup.lua', Buffer.from('local m=peripheral.wrap("left"); m.setTextScale(0.5); m.clear(); m.setCursorPos(1,1); m.write("SCALE"); m.setCursorBlink(true)'));
+  const monitorSetup = await session.exclusive(() => session.terminal('command', 'monitor-setup', 0));
+  assert.ok('commandId' in monitorSetup);
+  await until(async () => (await session.commandStatus(monitorSetup.commandId)).command.state === 'finished');
   await session.exclusive(() => session.write('/large', large));
   assert.deepEqual(await session.exclusive(() => session.read('/large')), large);
   await session.exclusive(() => session.write('/large', Buffer.alloc(large.length, 98), fileHash(large)));

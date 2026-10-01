@@ -885,6 +885,34 @@ local function enhance(rawterm)
                 return send(connection, message)
             end
         end
+        -- Upstream races window receivers against local events using
+        -- parallel.waitForAny. A local event can discard its caller while a
+        -- filesystem/peripheral API is yielding. Retain the receive coroutine
+        -- across those calls so an in-flight operation resumes, never restarts.
+        -- Its current event filter is retained too: do not resume a suspended
+        -- API with an empty or unrelated event when a new caller arrives.
+        local receive = delegate.receive
+        local receiver, received
+        function delegate:receive(...)
+            if not receiver then
+                receiver = coroutine.create(receive)
+                received = table.pack(coroutine.resume(receiver, self, ...))
+            end
+            while true do
+                if not received[1] then
+                    local reason = received[2]
+                    receiver, received = nil, nil
+                    error(reason, 0)
+                end
+                if coroutine.status(receiver) == "dead" then
+                    local result = received
+                    receiver, received = nil, nil
+                    return table.unpack(result, 2, result.n)
+                end
+                local ev = table.pack(os.pullEventRaw(received[2]))
+                received = table.pack(coroutine.resume(receiver, table.unpack(ev, 1, ev.n)))
+            end
+        end
         local win = originalServer(delegate, ...)
         capture = captureTerminal(win, function(data)
             local original = string.char(69, 0) .. data

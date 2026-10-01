@@ -156,7 +156,7 @@ Current enhanced launchers automatically collect identity when connected and ref
 
 `kind` is `computer`, `turtle`, `pocket`, or `command`. An unset label and unavailable host string are `null`. `color` reports color-terminal support. Computer IDs are supplied by that Minecraft world/emulator, not globally unique identifiers.
 
-Discovery uses `peripheral.getNames`, every value returned by `peripheral.getType`, and `peripheral.getMethods`. It includes direct attachments and peripherals exposed through wired modems. Names, types and methods are sorted and preserved as reported; this works with standard CC:Tweaked peripherals and mods such as **[Advanced Peripherals](https://docs.advanced-peripherals.de/0.7/)** that expose the same API. Discovery only lists methods. Invoke them with ordinary Lua through programs or the REPL; mod configuration and permissions still determine which calls work. Actual Advanced Peripherals devices have not been tested in the emulator.
+Discovery uses `peripheral.getNames`, every value returned by `peripheral.getType`, and `peripheral.getMethods`. It includes direct attachments and peripherals exposed through wired modems. Names, types and methods are sorted and preserved as reported; this works with standard CC:Tweaked peripherals and mods such as **[Advanced Peripherals](https://docs.advanced-peripherals.de/0.7/)** that expose the same API. Discovery only lists methods. Invoke them with ordinary Lua through programs or the REPL; mod configuration and permissions still determine which calls work. Weak Automata discovery and basic queries were verified in-game in ATM10 8.2. See [automata troubleshooting](docs/automata-troubleshooting.md) for verified workarounds for unnamed upgrades and self-targeting raycasts.
 
 Labels and hot attachment/detachment appear on a subsequent refresh. Inspection does not type into or interrupt the foreground program. Non-yielding programs can delay it, as with other remote requests. Each observation is best-effort rather than an atomic world snapshot; a device detached during inspection may carry its own `error`.
 
@@ -515,6 +515,14 @@ An additional integration test runs **the actual upstream Lua scripts and our en
 ```sh
 RUN_STOCK_INTEGRATION=1 npm test
 ```
+
+The complete suite has been verified with **CraftOS-PC 2.8.3-luajit**. Select a
+working LuaJIT executable with `CRAFTOS_BIN=/path/to/craftos-luajit`. The standard
+2.8.3 build exhibited intermittent garbage-collection stalls during the long
+integration scenario, including file-transfer and identity-refresh timeouts.
+Debugger samples caught it sweeping Lua objects; an object-list walk found no
+cycle. That emulator-specific diagnosis remains incomplete; the LuaJIT run does
+not establish that the standard build's stalls are fixed.
 
 It requires `craftos` on `PATH` (or `CRAFTOS_BIN`), network access to fetch upstream sources, and the directory `/tmp/opencode`. It verifies the fetched source against recorded Git blob hashes and cleans up its temporary computer data. Coverage includes stock terminal/filesystem operations and warning metadata, installation over stock, direct-download enhanced startup, 1 MiB binary round-trips and text edits, monitor preservation, and an unextended legacy client controlling the enhanced terminal. Command tests exercise successful/failed and delayed completion, interactive input, busy/partial-prompt rejection, the Lua REPL, interruption, and disconnect uncertainty. Output tests cover fast scrolling logs, blank/error lines, live progress replacement, final partial lines, command filtering, pagination, retention/truncation, and access after disconnect. Local WebSocket tests also verify acknowledgment/completion races, lost acknowledgments without retry, legacy behavior, and changing-file detection.
 
