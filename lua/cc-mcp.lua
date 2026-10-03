@@ -132,15 +132,126 @@ end
 
 -- A single foreground shell owns tracked execution. Programs still run through
 -- CraftOS's shell.run API, retaining its path resolution, aliases and Lua API.
+-- Own the prompt buffer: the public read() API does not expose edits, and
+-- completion callbacks alone miss history selection and edits mid-line.
+-- Keep this editor local to our shell; programs still use the normal read().
+local function readPrompt(history)
+    local line, pos, scroll, historyPos = "", 0, 0, nil
+    local completions, completion
+    local sx = term.getCursorPos()
+    local function recomplete()
+        completions = pos == #line and shell.complete(line) or nil
+        completion = completions and #completions > 0 and 1 or nil
+    end
+    local function redraw()
+        local width = term.getSize()
+        if sx + pos - scroll >= width then scroll = sx + pos - width
+        elseif pos < scroll then scroll = pos end
+        local _, y = term.getCursorPos()
+        term.setCursorPos(sx, y)
+        term.write(string.rep(" ", math.max(0, width - sx + 1)))
+        term.setCursorPos(sx, y)
+        term.write(line:sub(scroll + 1))
+        if completion then
+            local fg, bg = term.getTextColor(), term.getBackgroundColor()
+            term.setTextColor(colors.white)
+            term.setBackgroundColor(colors.gray)
+            term.write(completions[completion])
+            term.setTextColor(fg)
+            term.setBackgroundColor(bg)
+        end
+        term.setCursorPos(sx + pos - scroll, y)
+        term.setCursorBlink(true)
+        local ready = #line == 0
+        if commandState.ready ~= ready then
+            commandState.ready = ready
+            foregroundChanged()
+        end
+    end
+    local function acceptCompletion()
+        if completion then
+            line = line .. completions[completion]
+            pos = #line
+            recomplete()
+        end
+    end
+    recomplete()
+    redraw()
+    while true do
+        local event, value, x, y = os.pullEvent()
+        if event == "char" or event == "paste" then
+            line = line:sub(1, pos) .. value .. line:sub(pos + 1)
+            pos = pos + #value
+            recomplete()
+        elseif event == "key" then
+            if value == keys.enter or value == keys.numPadEnter then
+                completions, completion = nil, nil
+                redraw()
+                term.setCursorBlink(false)
+                print()
+                return line
+            elseif value == keys.left then
+                pos = math.max(0, pos - 1)
+                recomplete()
+            elseif value == keys.right then
+                if pos < #line then pos = pos + 1; recomplete()
+                else acceptCompletion() end
+            elseif value == keys.home then
+                pos = 0
+                recomplete()
+            elseif value == keys["end"] then
+                pos = #line
+                recomplete()
+            elseif value == keys.backspace then
+                if pos > 0 then
+                    line = line:sub(1, pos - 1) .. line:sub(pos + 1)
+                    pos = pos - 1
+                    if scroll > 0 then scroll = scroll - 1 end
+                    recomplete()
+                end
+            elseif value == keys.delete then
+                if pos < #line then
+                    line = line:sub(1, pos) .. line:sub(pos + 2)
+                    recomplete()
+                end
+            elseif value == keys.tab then
+                acceptCompletion()
+            elseif value == keys.up or value == keys.down then
+                if completion then
+                    completion = (completion - 1 + (value == keys.up and -1 or 1)) % #completions + 1
+                else
+                    if value == keys.up then
+                        if not historyPos then
+                            if #history > 0 then historyPos = #history end
+                        else historyPos = math.max(1, historyPos - 1) end
+                    elseif historyPos == #history then historyPos = nil
+                    elseif historyPos then historyPos = historyPos + 1 end
+                    line = historyPos and history[historyPos] or ""
+                    pos, scroll = #line, 0
+                    completions, completion = nil, nil
+                end
+            end
+        elseif (event == "mouse_click" or event == "mouse_drag") and value == 1 then
+            local width = term.getSize()
+            local _, cy = term.getCursorPos()
+            if x >= sx and x <= width and y == cy then
+                pos = math.min(math.max(scroll + x - sx, 0), #line)
+                recomplete()
+            end
+        end
+        if event == "char" or event == "paste" or event == "key" or event == "mouse_click" or event == "mouse_drag" or event == "term_resize" then redraw() end
+    end
+end
+
 -- The read coroutine lets a remote start replace an empty prompt without
 -- injecting keystrokes, while ordinary local/remote typing remains interactive.
 local function trackedShell()
     local history = {}
     local function readCommand()
-        local reader = coroutine.create(function() return read(nil, history, shell.complete) end)
-        local ok, filter = coroutine.resume(reader)
+        local reader = coroutine.create(function() return readPrompt(history) end)
         commandState.ready = true
         commandState.phase, commandState.program, commandState.id = "shell", nil, nil
+        local ok, filter = coroutine.resume(reader)
         foregroundChanged()
         while ok and coroutine.status(reader) ~= "dead" do
             local ev = table.pack(os.pullEventRaw())
@@ -152,12 +263,6 @@ local function trackedShell()
                 foregroundChanged()
                 print(pending.command)
                 return pending.command, pending.id
-            end
-            if ev[1] == "char" or ev[1] == "paste" or ev[1] == "key" then
-                -- Conservatively protect partially typed lines, including
-                -- history/completion changes. Enter resets this at next prompt.
-                commandState.ready = false
-                foregroundChanged()
             end
             if not filter or ev[1] == filter or ev[1] == "terminate" then
                 ok, filter = coroutine.resume(reader, table.unpack(ev, 1, ev.n))

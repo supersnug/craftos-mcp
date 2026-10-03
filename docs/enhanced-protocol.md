@@ -41,7 +41,7 @@ Command tracking is independently negotiated with `0x4000`. It uses window 0 and
 
 ### Start request: type 66
 
-The decoded bytes are `type=66`, `window=0`, `version=1`, `requestId`, followed by two NUL-terminated strings: `commandId` and `command`. Commands must be non-blank, single-line, and at most 4096 bytes. The launcher rejects a request unless its single foreground shell is at an untouched idle prompt.
+The decoded bytes are `type=66`, `window=0`, `version=1`, `requestId`, followed by two NUL-terminated strings: `commandId` and `command`. Commands must be non-blank, single-line, and at most 4096 bytes. The launcher rejects a request unless its single foreground shell is at an empty idle prompt. Spaces count as input; non-text keys do not make an empty prompt busy, and clearing all input restores readiness.
 
 ### Start acknowledgment: type 67
 

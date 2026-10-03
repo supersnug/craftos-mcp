@@ -399,7 +399,7 @@ Pass its ID to `get_command_status`:
 
 There is no invented numeric exit code. A short command can finish before `run_command` returns. The wait is bounded, not an execution deadline; a long-running command stays interactive and can be queried later. Timestamps are client observations; restored records without a previous local record use reattachment time. Status history retains the most recent 128 commands in memory. Disconnect marks unfinished commands unknown. A resumable launcher restores retained command states on reattachment; older launchers cannot restore them after the MCP forgets a session or restarts.
 
-The enhanced launcher uses a single foreground shell that calls CraftOS's `shell.run`, preserving command lookup, aliases, working-directory changes, interactive programs, completion, and an in-session input history. It does not start multishell tabs. Commands are admitted only at an untouched idle prompt; a running program or keyboard-edited prompt rejects the request without injecting any input. Finish/submit an existing input line through the text/key tools before starting another tracked command. Commands entered manually are not assigned tracking IDs.
+The enhanced launcher uses a single foreground shell that calls CraftOS's `shell.run`, preserving command lookup, aliases, working-directory changes, interactive programs, completion, and an in-session input history. It does not start multishell tabs. Commands are admitted only at an empty idle prompt; a running program or nonempty prompt rejects the request without injecting any input. Submit or clear an existing input line through the text/key tools before starting another tracked command. Commands entered manually are not assigned tracking IDs.
 
 Stock connections and older enhanced launchers advertise `commandTracking: false`. They retain the original paste-and-Enter `run_command` behavior and report completion as unknown. Upgrade the Lua launcher as well as the MCP server to enable tracking. A locally installed copy can be updated with `install_enhanced_script` and `overwrite: true`, then restarted using a fresh connection's `installedCommand`.
 
@@ -445,7 +445,7 @@ Example while a tracked program is running:
 ```
 
 - **`shell`** with `prompt: "idle"`: the enhanced shell can accept a tracked command when `canRunCommand` is true.
-- **`shell`** with `prompt: "editing"`: keyboard input has touched the current prompt. Submit/finish that line with the text/key tools before starting a tracked command. This conservatively includes navigation and backspacing a line to empty.
+- **`shell`** with `prompt: "editing"`: the current prompt contains input, including spaces, pasted text, history selections, or accepted completions. Submit or clear that line before starting a tracked command. Non-text keys on an empty prompt leave it idle; deleting all input restores idle immediately. Completion suggestions are not input until accepted.
 - **`starting`**: the shell is transitioning between the prompt and execution; it cannot accept another command.
 - **`program`**: a program is executing; use `send_text`/`send_key` for its input.
 - **`lua_repl`**: the observed running path is the built-in `rom/programs/lua.lua`. Send Lua expressions as interactive input, not tracked shell commands.

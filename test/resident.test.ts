@@ -68,6 +68,39 @@ for (const reconnect of [false, true]) test(`launcher remains responsive after s
   assert.match(identity.craftosVersion!, /^CraftOS/);
   assert.ok(identity.peripherals!.find(p => p.name === 'left')!.types.includes('monitor'));
   assert.ok(identity.peripherals!.find(p => p.name === 'left')!.methods.includes('write'));
+  // Editing means actual input, not simply that a key was pressed.
+  async function promptKey(key: string, ready: boolean) {
+    await session.exclusive(() => session.terminal('key', key, 100));
+    await until(() => session.status().foreground.canRunCommand === ready, 3000);
+    assert.equal(session.status().foreground.canRunCommand, ready, `prompt after ${key}`);
+  }
+  for (const key of ['leftShift', 'left', 'backspace', 'delete', 'home', 'end', 'down']) await promptKey(key, true);
+  await session.exclusive(() => session.terminal('text', ' ', 100));
+  assert.equal(session.status().foreground.canRunCommand, false);
+  await assert.rejects(session.terminal('command', 'echo protected', 0), /prompt|idle/i);
+  await promptKey('backspace', true);
+  await session.exclusive(() => session.terminal('text', 'xy', 100));
+  await promptKey('home', false);
+  await promptKey('delete', false);
+  await promptKey('delete', true);
+  await session.exclusive(() => session.terminal('text', 'clear', 100));
+  await promptKey('enter', true);
+  await promptKey('up', false);
+  await promptKey('down', true);
+  await session.exclusive(() => session.terminal('text', 'clea', 100));
+  await promptKey('tab', false); // Accept "clear " completion, including its trailing space.
+  for (let i = 0; i < 6; i++) await promptKey('backspace', i === 5);
+  // Cursor navigation (including mouse input) must not make existing text idle.
+  await session.exclusive(() => session.terminal('text', 'xy', 100));
+  const promptRow = session.snapshot().screen!.cursor.y;
+  await session.exclusive(() => session.mouse('mouse_click', 3, promptRow, 'left', undefined, 100));
+  await promptKey('delete', false);
+  await promptKey('delete', true);
+  // Long, horizontally scrolled input stays protected, even at its beginning.
+  await session.exclusive(() => session.terminal('text', 'x'.repeat(80), 100));
+  await promptKey('home', false);
+  await promptKey('end', false);
+  await promptKey('down', true); // Returning past history clears the buffer.
   // A filesystem implementation may yield. An unrelated local timer must not
   // let upstream's parallel event race abandon the in-flight file response.
   await session.write('/yielding-read', Buffer.from('survived'));
