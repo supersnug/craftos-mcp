@@ -600,7 +600,9 @@ export class Session {
     if (commandId && target !== commandId) throw new Error('Interrupt response target mismatch; outcome is unknown, do not retry automatically');
     await delay(waitMs);
     const command = target ? this.commands.get(target) : undefined;
-    return { ...this.snapshot(), interruption: { mode, outcome, reliable: true, commandId: target || undefined }, command: command ? { ...command } : undefined };
+    return { ...this.snapshot(), interruption: { mode, outcome, reliable: true, commandId: target || undefined,
+      warning: mode === 'force' ? 'Players can only request graceful termination with Ctrl+T. Force termination is an MCP capability, not a player control.' : undefined,
+    }, command: command ? { ...command } : undefined };
   }
 
   private async runTracked(line: string, waitMs: number) {
