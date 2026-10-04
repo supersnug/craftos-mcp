@@ -510,6 +510,8 @@ npm run check
 
 Builds and runs protocol, local WebSocket session, MCP tool-discovery, error-handling, and compiled stdio-startup tests. Tests do not contact the public relay.
 
+The focused prompt-editor tests require **Lua 5.2 or newer** (`lua` on `PATH`, or set `LUA_BIN`). They exercise the actual `readPrompt` function with deterministic completions and a terminal model supporting clipping, resizing, and newline scrolling, without CraftOS or network access. Run them alone with `lua test/prompt.lua`. They cover editing results, history, mouse placement, completion selection, rendering, submission, and buffer-based readiness.
+
 An additional integration test runs **the actual upstream Lua scripts and our enhanced launcher in CraftOS-PC** against a temporary local relay, using headless and raw renderers:
 
 ```sh

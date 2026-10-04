@@ -191,17 +191,14 @@ local function readPrompt(history)
                 print()
                 return line
             elseif value == keys.left then
-                pos = math.max(0, pos - 1)
-                recomplete()
+                if pos > 0 then pos = pos - 1; recomplete() end
             elseif value == keys.right then
                 if pos < #line then pos = pos + 1; recomplete()
                 else acceptCompletion() end
             elseif value == keys.home then
-                pos = 0
-                recomplete()
+                if pos > 0 then pos = 0; recomplete() end
             elseif value == keys["end"] then
-                pos = #line
-                recomplete()
+                if pos < #line then pos = #line; recomplete() end
             elseif value == keys.backspace then
                 if pos > 0 then
                     line = line:sub(1, pos - 1) .. line:sub(pos + 1)
@@ -235,8 +232,8 @@ local function readPrompt(history)
             local width = term.getSize()
             local _, cy = term.getCursorPos()
             if x >= sx and x <= width and y == cy then
-                pos = math.min(math.max(scroll + x - sx, 0), #line)
-                recomplete()
+                local nextPos = math.min(math.max(scroll + x - sx, 0), #line)
+                if nextPos ~= pos then pos = nextPos; recomplete() end
             end
         end
         if event == "char" or event == "paste" or event == "key" or event == "mouse_click" or event == "mouse_drag" or event == "term_resize" then redraw() end
